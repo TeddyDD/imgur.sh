@@ -1,8 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
+set -eu
 
 # Imgur script by Bart Nagel <bart@tremby.net>
 # Improvements by Tino Sino <robottinosino@gmail.com>
-# Version 6 or more
+# Port to POSIX sh by Daniel Lewan <vision360.daniel@gmail.com>
+#
 # I release this into the public domain. Do with it what you will.
 # The latest version can be found at https://github.com/tremby/imgur.sh
 
@@ -13,8 +15,8 @@ default_client_id=c9a6efb3d7932fd
 client_id="${IMGUR_CLIENT_ID:=$default_client_id}"
 
 # Function to output usage instructions
-function usage {
-	echo "Usage: $(basename $0) [<filename|URL> [...]]" >&2
+usage() {
+	echo "Usage: basename ${0##*/} [<filename|URL> [...]]" >&2
 	echo
 	echo "Upload images to imgur and output their new URLs to stdout. Each one's" >&2
 	echo "delete page is output to stderr between the view URLs." >&2
@@ -27,14 +29,14 @@ function usage {
 
 # Function to upload a path
 # First argument should be a content spec understood by curl's -F option
-function upload {
+upload() {
 	curl -s -H "Authorization: Client-ID $client_id" -H "Expect: " -F "image=$1" https://api.imgur.com/3/image.xml
 	# The "Expect: " header is to get around a problem when using this through
 	# the Squid proxy. Not sure if it's a Squid bug or what.
 }
 
 # Check arguments
-if [ "$1" == "-h" -o "$1" == "--help" ]; then
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
 	usage
 	exit 0
 elif [ $# -eq 0 ]; then
@@ -43,7 +45,7 @@ elif [ $# -eq 0 ]; then
 fi
 
 # Check curl is available
-type curl &>/dev/null || {
+command -v curl >/dev/null || {
 	echo "Couldn't find curl, which is required." >&2
 	exit 17
 }
@@ -57,13 +59,13 @@ while [ $# -gt 0 ]; do
 	shift
 
 	# Upload the image
-	if [[ "$file" =~ ^https?:// ]]; then
+	if echo "$file" | grep -E "^https?"; then
 		# URL -> imgur
 		response=$(upload "$file") 2>/dev/null
 	else
 		# File -> imgur
 		# Check file exists
-		if [ "$file" != "-" -a ! -f "$file" ]; then
+		if [ "$file" != "-" ] && [ ! -f "$file" ]; then
 			echo "File '$file' doesn't exist; skipping" >&2
 			errors=true
 			continue
@@ -88,24 +90,23 @@ while [ $# -gt 0 ]; do
 	url="${url%%</link>*}"
 	delete_hash="${response##*<deletehash>}"
 	delete_hash="${delete_hash%%</deletehash>*}"
-	echo $url | sed 's/^http:/https:/'
+	echo "$url" | sed 's/^http:/https:/'
 	echo "Delete page: https://imgur.com/delete/$delete_hash" >&2
 
 	# Append the URL to a string so we can put them all on the clipboard later
-	clip+="$url"
-	if [ $# -gt 0 ]; then
-		clip+=$'\n'
-	fi
+	clip="${clip:-} ${url}"
 done
 
+clip="$(echo ${clip:-} | tr '[:space:]' '\n')"
+
 # Put the URLs on the clipboard if we can
-if type pbcopy &>/dev/null; then
-	echo -n "$clip" | pbcopy
-elif [ $DISPLAY ]; then
-	if type xsel &>/dev/null; then
-		echo -n "$clip" | xsel -i
-	elif type xclip &>/dev/null; then
-		echo -n "$clip" | xclip
+if command -v pbcopy >/dev/null; then
+	echo "$clip" | pbcopy
+elif [ -n "$DISPLAY" ]; then
+	if command -v xsel >/dev/null; then
+		echo "$clip" | xsel -ib
+	elif command -v xclip >/dev/null; then
+		echo "$clip" | xclip
 	else
 		echo "Haven't copied to the clipboard: no xsel or xclip" >&2
 	fi
